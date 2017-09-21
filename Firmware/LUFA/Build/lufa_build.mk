@@ -128,7 +128,7 @@ ifeq ($(ARCH), AVR8)
    CROSS        := $(COMPILER_PATH)avr
 else ifeq ($(ARCH), XMEGA)
    CROSS        := $(COMPILER_PATH)avr
-   $(warning The XMEGA device support is currently EXPERIMENTAL (incomplete and/or non-functional), and is included for preview purposes only.)
+#   $(warning The XMEGA device support is currently EXPERIMENTAL (incomplete and/or non-functional), and is included for preview purposes only.)
 else ifeq ($(ARCH), UC3)
    CROSS        := $(COMPILER_PATH)avr32
    $(warning The UC3 device support is currently EXPERIMENTAL (incomplete and/or non-functional), and is included for preview purposes only.)
