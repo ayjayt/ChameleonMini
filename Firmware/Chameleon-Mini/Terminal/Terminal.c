@@ -3,36 +3,46 @@
 #include "../System.h"
 #include "../LEDHook.h"
 
-#include "../LUFADescriptors.h"
+
+void ptc(char c){
+	do{
+			/* Wait until it is possible to put data into TX data register.*/
+	} while(!( (USARTD1.STATUS & USART_DREIF_bm) != 0));
+	USARTD1.DATA = c;
+}
+void pts(const char * str, uint16_t len){
+	uint8_t i = 0;
+	if (len){
+		for(; i < len; i++){
+			ptc(str[i]);
+		}
+	} else {
+		while (str[i] != 0){
+			ptc(str[i++]);
+		} ptc(0);
+	}
+}
+
+volatile int16_t gtc(){
+	volatile int16_t recv;
+	if (USARTD1.STATUS & USART_RXCIF_bm) {
+		recv = USARTD1.DATA;
+		ptc((char)recv);
+		return (int16_t) recv;
+	} else {
+		return -1;
+	}
+}
 
 #define INIT_DELAY		(2000 / SYSTEM_TICK_MS)
 
 
-USB_ClassInfo_CDC_Device_t TerminalHandle = {
-    .Config = {
-        .ControlInterfaceNumber = 0,
-        .DataINEndpoint = {
-            .Address = CDC_TX_EPADDR,
-            .Size = CDC_TXRX_EPSIZE,
-            .Banks = 1,
-        }, .DataOUTEndpoint = {
-            .Address = CDC_RX_EPADDR,
-            .Size = CDC_TXRX_EPSIZE,
-            .Banks = 1,
-        }, .NotificationEndpoint = {
-            .Address = CDC_NOTIFICATION_EPADDR,
-            .Size = CDC_NOTIFICATION_EPSIZE,
-            .Banks = 1,
-        },
-    }
-};
-
 uint8_t TerminalBuffer[TERMINAL_BUFFER_SIZE];
 TerminalStateEnum TerminalState = TERMINAL_UNINITIALIZED;
-static uint8_t TerminalInitDelay = INIT_DELAY;
+
 
 void TerminalSendString(const char* s) {
-	CDC_Device_SendString(&TerminalHandle, s);
+	pts(s, 0);
 }
 
 void TerminalSendStringP(const char* s) {
@@ -56,14 +66,41 @@ void TerminalSendHex(void* Buffer, uint16_t ByteCount)
 */
 
 
+char bigBuffer[64];
+uint16_t writeC = 0, readC = 0, mark = 0;
+int16_t getByteFromBuffer(void){
+	if (readC == 64){
+		readC = 0;
+	}
+	if (mark){
+		if (bigBuffer[readC] == '\r') {
+			mark--;
+		}
+		return bigBuffer[readC++];
+	}
+	return -1;
+}
+void newUART(void){
+	volatile int16_t rcvLocal = gtc();
+	if (rcvLocal != -1){
+		bigBuffer[writeC++] = (char)rcvLocal;
+		if (writeC == 64) {
+			writeC = 0;
+		}
+		if ((char)rcvLocal == '\r') {
+			mark++;
+		}
+	}
+}
+
 void TerminalSendBlock(const void* Buffer, uint16_t ByteCount)
 {
-    CDC_Device_SendData(&TerminalHandle, Buffer, ByteCount);
+  	pts(Buffer, ByteCount); 
 }
 
 
 static void ProcessByte(void) {
-    int16_t Byte = CDC_Device_ReceiveByte(&TerminalHandle);
+		int16_t Byte = getByteFromBuffer();
 
     if (Byte >= 0) {
         /* Byte received */
@@ -79,54 +116,19 @@ static void ProcessByte(void) {
 
 static void SenseVBus(void)
 {
-    switch(TerminalState) {
-    case TERMINAL_UNINITIALIZED:
-    	if (TERMINAL_VBUS_PORT.IN & TERMINAL_VBUS_MASK) {
-    		/* Not initialized and VBUS sense high */
-    		TerminalInitDelay = INIT_DELAY;
-    		TerminalState = TERMINAL_INITIALIZING;
-    	}
-    break;
-
-    case TERMINAL_INITIALIZING:
-    	if (--TerminalInitDelay == 0) {
-            SystemStartUSBClock();
-            USB_Init();
-            TerminalState = TERMINAL_INITIALIZED;
-    	}
-    	break;
-
-    case TERMINAL_INITIALIZED:
-    	if (!(TERMINAL_VBUS_PORT.IN & TERMINAL_VBUS_MASK)) {
-    		/* Initialized and VBUS sense low */
-    		TerminalInitDelay = INIT_DELAY;
-    		TerminalState = TERMINAL_UNITIALIZING;
-    	}
-    	break;
-
-    case TERMINAL_UNITIALIZING:
-    	if (--TerminalInitDelay == 0) {
-        	USB_Disable();
-        	SystemStopUSBClock();
-        	TerminalState = TERMINAL_UNINITIALIZED;
-    	}
-    	break;
-
-    default:
-    	break;
-    }
+		TerminalState = TERMINAL_INITIALIZED;
 }
 
 void TerminalInit(void)
 {
-    TERMINAL_VBUS_PORT.DIRCLR = TERMINAL_VBUS_MASK;
+   // Could put UART Init here 
 }
 
 void TerminalTask(void)
 {
 	if (TerminalState == TERMINAL_INITIALIZED) {
-		CDC_Device_USBTask(&TerminalHandle);
-		USB_USBTask();
+
+		// maybe these were used to actually send out what was in a buffer?
 
 		ProcessByte();
 	}
@@ -158,13 +160,13 @@ void EVENT_USB_Device_Disconnect(void)
 /** Event handler for the library USB Configuration Changed event. */
 void EVENT_USB_Device_ConfigurationChanged(void)
 {
-    CDC_Device_ConfigureEndpoints(&TerminalHandle);
+;
 }
 
 /** Event handler for the library USB Control Request reception event. */
 void EVENT_USB_Device_ControlRequest(void)
 {
-    CDC_Device_ProcessControlRequest(&TerminalHandle);
+;
 }
 
 
